@@ -112,6 +112,7 @@ textarea{resize:vertical;min-height:64px;line-height:1.4}
 .opt.wrong{background:var(--badbg);border-color:var(--bad)} .opt.wrong .lt{color:var(--bad)}
 .opt.wrong::after{content:"✗";margin-left:auto;color:var(--bad);font-weight:800;flex:none}
 .opt.dim{opacity:.65}
+.opt.sel{background:color-mix(in srgb,var(--brand) 14%,transparent);border-color:var(--brand)}
 .opt:disabled{cursor:default}
 .grade{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-top:1rem}
 .grade .g{border:1px solid var(--line);background:var(--card2);border-radius:11px;padding:.55rem .3rem;min-height:54px;
@@ -403,7 +404,8 @@ function renderStudy(v){
     </div>
     <div class="card"><h3 style="margin-bottom:.5rem">🎨 Código de colores por tema</h3>
       <div class="row" style="gap:.4rem">${legendHtml()}</div>
-      <p class="mut sm" style="margin:.6rem 0 0">Filtra por tema arriba. La respuesta correcta sale marcada al revelar; si ves alguna sin marcar o errónea, corrígela con un clic o ✎ Editar.</p>
+      <p class="mut sm" style="margin:.6rem 0 .4rem">Filtra por tema arriba. En cada pregunta tienes <b>✎ Editar respuesta</b> siempre visible (se guarda para siempre, sin ir al Banco) y flechas <b>◀ ▶</b> para avanzar o retroceder, también en las que no tienen respuesta.</p>
+      <div class="note warn" style="margin:0"><b>⚠️ Aviso:</b> ${allQuestions().filter(q=>q.ai).length} respuestas las he propuesto yo (tu profesor-IA) según la normativa porque <b>no venían marcadas en el PDF</b> — salen con la etiqueta «✎ resp. IA · no en PDF»; verifícalas. Quedan ${allQuestions().filter(q=>!(q.correct&&q.correct.length)).length} sin respuesta (suelen depender de una imagen/receta del PDF): márcalas tú al verlas.</div>
     </div>`;
     let mode='test';
     v.querySelector('#modeSeg').addEventListener('click',e=>{const b=e.target.closest('[data-m]');if(!b)return;mode=b.dataset.m;
@@ -426,32 +428,49 @@ function renderStudy(v){
   let optsHtml=opts.map(o=>{
     let cls='opt';
     if(sess.revealed){
-      if(q.correct.includes(o.l))cls+=' correct';
-      else if(sess.chosen===o.l)cls+=' wrong';
-      else cls+=' dim';
+      if(hasAns&&q.correct.includes(o.l))cls+=' correct';
+      else if(sess.chosen===o.l)cls+=(hasAns?' wrong':' sel');
+      else if(hasAns)cls+=' dim';
     }
     return `<button class="${cls}" ${sess.revealed?'disabled':''} data-l="${o.l}" onclick="pick('${o.l}')"><span class="lt">${o.l})</span><span>${esc(o.t)}</span></button>`;
   }).join('');
   if(sess.mode==='card'&&!sess.revealed)optsHtml=`<button class="btn block acc" onclick="reveal()">👁 Mostrar respuesta</button>`;
 
   v.innerHTML=`<div class="card">
-    <div class="row sm mut" style="margin-bottom:.5rem"><span>Pregunta ${sess.i+1} / ${sess.queue.length}</span>
+    <div class="row sm mut" style="margin-bottom:.5rem">
+      <button class="btn ghost sm" onclick="prev()" ${sess.i===0?'disabled':''} title="anterior (←)">◀</button>
+      <span>Pregunta ${sess.i+1} / ${sess.queue.length}</span>
       <span class="spacer"></span>${isNew(q.id)?'<span class="chip">🆕 nueva</span>':isDue(q.id)?'<span class="chip">⏰ repaso</span>':''}
       <button class="fav ${p.fav?'on':''}" onclick="toggleFav(${q.id})" title="favorita (f)">★</button></div>
     <div class="bar" style="margin-bottom:.8rem"><i style="width:${pct}%"></i></div>
     ${metaChips(q)}
     <div class="qtext">${esc(q.text)}</div>
-    ${hasAns?'':'<div class="note bad">⚠ Sin respuesta marcada en el PDF. Márcala abajo o edítala.</div>'}
+    ${hasAns?'':'<div class="note bad">⚠ Esta pregunta no tiene respuesta. Márcala tú en «✎ Editar respuesta» (se guarda para siempre) o pasa con ▶.</div>'}
     <div class="opts" id="opts">${optsHtml}</div>
     <div id="after"></div>
+    ${editBox(q)}
+    <div class="row" style="margin-top:1rem;border-top:1px solid var(--line);padding-top:.8rem">
+      <button class="btn ghost" onclick="prev()" ${sess.i===0?'disabled':''}>◀ Anterior</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" onclick="next()">Saltar / Siguiente ▶</button>
+    </div>
   </div>`;
   if(sess.revealed)renderAfter(q);
 }
-function pick(l){const q=sess.queue[sess.i];if(!q.correct.length){return;}sess.chosen=l;sess.revealed=true;renderStudy(document.getElementById('view'));}
+// editor de respuesta SIEMPRE disponible en estudiar (sin ir al Banco)
+function editBox(q){return `<details class="editbox" ${q.correct.length?'':'open'} style="margin-top:1rem;border:1px dashed var(--line);border-radius:12px;padding:.55rem .8rem">
+  <summary style="cursor:pointer;font-weight:700;color:var(--acc)">✎ Editar respuesta${q.ai?' · <span style="color:var(--warn)">propuesta por IA (no en PDF)</span>':''}</summary>
+  <p class="sm mut" style="margin:.5rem 0 .4rem">Marca la correcta (se guarda para siempre, también en el Banco):</p>
+  <div class="fix" style="margin:0;border:none;padding:0">
+    ${q.options.map(o=>`<button class="pick ${q.correct.includes(o.l)?'on':''}" onclick="setCorrect(${q.id},'${o.l}')" title="marcar ${o.l} como correcta">${o.l}</button>`).join('')}
+    <button class="btn ghost sm" onclick="openEdit(${q.id})">✎ Editar todo</button>
+  </div></details>`;}
+function pick(l){const q=sess.queue[sess.i];sess.chosen=l;sess.revealed=true;renderStudy(document.getElementById('view'));}
 function reveal(){sess.revealed=true;sess.chosen=null;renderStudy(document.getElementById('view'));}
 function renderAfter(q){
   const after=document.getElementById('after');
-  const expl=q.expl?`<div class="note warn" style="margin-top:.8rem">💡 ${esc(q.expl)}</div>`:'';
+  const aiNote=q.ai?`<div class="note warn" style="margin-top:.8rem">⚠️ Respuesta <b>propuesta por la IA</b> (no figura marcada en el PDF) — verifícala.</div>`:'';
+  const expl=q.expl?`<div class="note warn" style="margin-top:.5rem">💡 ${esc(q.expl)}</div>`:'';
   let grade='';
   if(q.correct.length){
     grade=`<div class="grade">
@@ -459,19 +478,15 @@ function renderAfter(q){
       <button class="g hard" onclick="grade(2)"><b>Difícil</b><small>${dueLabel(q.id,2)}</small></button>
       <button class="g good" onclick="grade(3)"><b>Bien</b><small>${dueLabel(q.id,3)}</small></button>
       <button class="g easy" onclick="grade(4)"><b>Fácil</b><small>${dueLabel(q.id,4)}</small></button></div>`;
-  }else{
-    grade=`<button class="btn block" style="margin-top:.8rem" onclick="next()">Siguiente ▶</button>`;
   }
-  after.innerHTML=expl+grade+`<div class="fix">
-    <span class="sm mut">¿Respuesta correcta?</span>
-    ${q.options.map(o=>`<button class="pick ${q.correct.includes(o.l)?'on':''}" onclick="setCorrect(${q.id},'${o.l}')" title="marcar ${o.l} como correcta">${o.l}</button>`).join('')}
-    <button class="btn ghost sm" onclick="openEdit(${q.id})">✎ Editar</button></div>`;
+  after.innerHTML=aiNote+expl+grade;
 }
 function grade(r){const q=sess.queue[sess.i];schedule(q.id,r);next();}
 function next(){sess.i++;sess.revealed=false;sess.chosen=null;sess._opts=null;render();}
+function prev(){if(sess.i>0){sess.i--;sess.revealed=false;sess.chosen=null;sess._opts=null;render();}}
 function toggleFav(id){const p=prog(id);p.fav=!p.fav;save();render();}
 function setCorrect(id,l){const cur=allQuestions().find(x=>x.id===id);
-  store.edits[id]={...(store.edits[id]||{}),correct:[l],inferred:false,options:cur.options};
+  store.edits[id]={...(store.edits[id]||{}),correct:[l],inferred:false,ai:false,options:cur.options};
   save();if(sess){sess.queue[sess.i]=applyEdit(BASE.find(b=>b.id===id)||store.added.find(a=>a.id===id));}render();}
 
 /* ===================== EXAMEN ===================== */
@@ -617,7 +632,8 @@ function metaChips(q){return `<div class="qmeta">
   ${q.month?`<span class="chip">${MONTHS[q.month]||q.month}</span>`:''}
   ${topChip(q.topic)}
   <span class="chip d-${q.difficulty||'media'}">${q.difficulty||'media'}</span>
-  ${q.inferred?'<span class="chip inf">resp. inferida</span>':''}</div>`;}
+  ${q.inferred?'<span class="chip inf">resp. inferida</span>':''}
+  ${q.ai?'<span class="chip inf">✎ resp. IA · no en PDF</span>':''}</div>`;}
 
 /* ===================== EDICION ===================== */
 let editId=null;
@@ -673,6 +689,8 @@ document.addEventListener('keydown',e=>{
   if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
   if(TAB!=='estudiar'||!sess||sess.i>=sess.queue.length)return;
   const q=sess.queue[sess.i];const k=e.key.toLowerCase();
+  if(e.key==='ArrowLeft'){prev();e.preventDefault();return;}
+  if(e.key==='ArrowRight'){next();e.preventDefault();return;}
   if(!sess.revealed){
     if('abcde'.includes(k)&&q.options.some(o=>o.l===k)){pick(k);e.preventDefault();}
     else if(k===' '&&sess.mode==='card'){reveal();e.preventDefault();}
